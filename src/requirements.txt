@@ -39,4 +39,5 @@ gunicorn
 pandas
 reportlab
 docx2pdf
+pdf2docx
 openpyxl
