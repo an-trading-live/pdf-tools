@@ -13,6 +13,17 @@ A FastAPI service for merging and compressing PDF files.
 - POST `/compress`: Upload one PDF to compress.
 - GET `/download/{filename}`: Download processed file.
 
+
+
+python3 -m venv venv
+source venv/bin/activate
+(venv) ➜  pdf-tools git:(main)
+pip install --upgrade pip
+pip install -r src/requirements.txt
+uvicorn src.main:app --reload
+
+
+source venv/bin/activate && pip install -r src/requirements.txt && uvicorn src.main:app --reload
 ## Testing
 Use http://localhost:8000/docs for interactive Swagger UI.
 
@@ -25,4 +36,10 @@ python3 -m venv venv
 source venv/bin/activate
 /Users/ktnaveen/Documents/Python-pdf-merge/pdf-tools/venv/bin/python3 -m pip install --upgrade pip
 pip install PyPDF2  # Or pip3 if needed
+pip freeze > requirements.txt
+
+git pull origin main
+ git add .
+ git commit -m "all the commands"
+ git push origin main
 pip freeze > requirements.txt

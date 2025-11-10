@@ -37,7 +37,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV="/Users/ktnaveen/Documents/Python-pdf-merge/pdf-tools/venv"
+VIRTUAL_ENV="/Users/ktnaveen/github/pdf-tools/pdf-tools/venv"
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"

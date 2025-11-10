@@ -29,7 +29,7 @@ end
 # Unset irrelevant variables.
 deactivate nondestructive
 
-set -gx VIRTUAL_ENV "/Users/ktnaveen/Documents/Python-pdf-merge/pdf-tools/venv"
+set -gx VIRTUAL_ENV "/Users/ktnaveen/github/pdf-tools/pdf-tools/venv"
 
 set -gx _OLD_VIRTUAL_PATH $PATH
 set -gx PATH "$VIRTUAL_ENV/bin" $PATH
