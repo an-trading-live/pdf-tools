@@ -11,6 +11,8 @@ from src.utils.word_converter import (convert_docx_to_pdf)
 app = FastAPI(title="PDF Tools API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+
+
 import logging
 
 # Setup logging (optional but recommended)
