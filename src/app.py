@@ -4,10 +4,11 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import FileResponse
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
-from utils.pdf_handler import (
+
+from src.utils.pdf_handler import (
 compress_pdf, excel_to_pdf, pdf_to_word, pdf_to_excel,merge_two_pdfs
 )
-from utils.word_converter import (convert_docx_to_pdf)
+from src.utils.word_converter import (convert_docx_to_pdf)
 app = FastAPI(title="PDF Tools API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
