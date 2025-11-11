@@ -43,3 +43,28 @@ git pull origin main
  git commit -m "all the commands"
  git push origin main
 pip freeze > requirements.txt
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# after set up git up 
+
+open render with you account select the git repository 
+set root directory to src
+build command as pip install -r requirements.txt
+start command as gunicorn app:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
+
+save these you application get starts to build 
