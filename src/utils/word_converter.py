@@ -80,7 +80,7 @@ def convert_docx_to_pdf(
             html_content,
             dst,
             configuration=pdfkit.configuration(
-                wkhtmltopdf="/usr/local/bin/wkhtmltopdf"
+                wkhtmltopdf="/usr/bin/wkhtmltopdf"
             ),
         )
         return dst
