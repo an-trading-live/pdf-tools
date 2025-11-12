@@ -41,3 +41,21 @@ reportlab
 docx2pdf
 pdf2docx
 openpyxl
+pdfrw
+
+fastapi
+uvicorn
+pypdf
+PyPDF2
+pdfrw
+PyMuPDF
+PyPDF4
+PyPDF3
+pdfplumber
+pdfminer.six
+
+PyMuPDF
+pikepdf
+pdf-compressor    # ← Add this
+pdfminer.six
+reportlab

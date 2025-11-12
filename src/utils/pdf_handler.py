@@ -17,14 +17,14 @@ import pandas as pd
 import pymupdf as fitz
 import uuid
 import shutil
-import subprocess
-import shutil
-import subprocess
 from datetime import datetime
 from typing import Dict
 from fastapi import UploadFile, HTTPException
 from pathlib import Path
-
+import subprocess
+import math
+from typing import Dict, Optional
+from fastapi import UploadFile
 import asyncio
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import FileResponse
@@ -44,22 +44,35 @@ def get_output_path(prefix: str, output_dir: str) -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return os.path.join(output_dir, f"{prefix}_{timestamp}.pdf")
 #working  merge
-def merge_two_pdfs(file_1: UploadFile, file_2: UploadFile,
-                   upload_dir: str, output_dir: str) -> Dict[str, str]:
+def merge_two_pdfs(
+    file_1: UploadFile,
+    file_2: UploadFile,
+    upload_dir: str,
+    output_dir: str,
+    library: str = "pypdf"
+) -> Dict[str, str]:
     """
-    Merges exactly two PDFs.
+    Merges exactly two PDFs using the specified library.
+
+    Supported libraries:
+        pypdf, PyPDF2, pdfrw, fitz (PyMuPDF), PyPDF4, PyPDF3, pdfplumber, pdfminer.six
+
     Returns dict with the filename of the merged PDF.
     """
-    from pypdf import PdfWriter
+    library = library.lower().strip()
 
-    # Validate
+    # -------------------------------
+    # 1. Validate file extensions
+    # -------------------------------
     for f in (file_1, file_2):
         if not f.filename.lower().endswith('.pdf'):
             raise ValueError(f"File '{f.filename}' is not a PDF.")
 
+    # -------------------------------
+    # 2. Save uploaded files temporarily
+    # -------------------------------
     temp_paths = []
     try:
-        # Save both files temporarily
         temp_path1 = get_temp_path(file_1.filename, "merge1", upload_dir)
         temp_path2 = get_temp_path(file_2.filename, "merge2", upload_dir)
 
@@ -70,170 +83,375 @@ def merge_two_pdfs(file_1: UploadFile, file_2: UploadFile,
 
         temp_paths = [temp_path1, temp_path2]
 
-        # Merge
-        writer = PdfWriter()
-        writer.append(temp_path1)
-        writer.append(temp_path2)
-
+        # -------------------------------
+        # 3. Merge using selected library
+        # -------------------------------
         output_path = get_output_path("merged", output_dir)
-        with open(output_path, "wb") as f:
-            writer.write(f)
-        writer.close()
+
+        if library == "pypdf":
+            from pypdf import PdfWriter
+            writer = PdfWriter()
+            writer.append(temp_path1)
+            writer.append(temp_path2)
+            with open(output_path, "wb") as f:
+                writer.write(f)
+
+        elif library == "pypdf2":
+            from PyPDF2 import PdfWriter, PdfReader
+            writer = PdfWriter()
+            for path in temp_paths:
+                reader = PdfReader(path)
+                for page in reader.pages:
+                    writer.add_page(page)
+            with open(output_path, "wb") as f:
+                writer.write(f)
+
+        elif library == "pdfrw":
+            from pdfrw import PdfWriter, PdfReader
+            writer = PdfWriter()
+            for path in temp_paths:
+                reader = PdfReader(path)
+                writer.addpages(reader.pages)
+            writer.write(output_path)
+
+        elif library in ("pymupdf", "fitz"):
+            import fitz  # PyMuPDF
+            doc = fitz.Document()
+            for path in temp_paths:
+                src = fitz.open(path)
+                doc.insert_pdf(src)
+                src.close()
+            doc.save(output_path)
+            doc.close()
+
+        elif library == "pypdf4":
+            from PyPDF4 import PdfFileWriter, PdfFileReader
+            writer = PdfFileWriter()
+            for path in temp_paths:
+                reader = PdfFileReader(path)
+                for page_num in range(reader.getNumPages()):
+                    writer.addPage(reader.getPage(page_num))
+            with open(output_path, "wb") as f:
+                writer.write(f)
+
+        elif library == "pypdf3":
+            from PyPDF3 import PdfFileWriter, PdfFileReader
+            writer = PdfFileWriter()
+            for path in temp_paths:
+                reader = PdfFileReader(path)
+                for page_num in range(reader.getNumPages()):
+                    writer.addPage(reader.getPage(page_num))
+            with open(output_path, "wb") as f:
+                writer.write(f)
+
+        elif library == "pdfplumber":
+            import pdfplumber
+            from pypdf import PdfWriter  # fallback writer
+            writer = PdfWriter()
+            for path in temp_paths:
+                with pdfplumber.open(path) as pdf:
+                    for page in pdf.pages:
+                        # pdfplumber doesn't support direct merge, so use pypdf as backend
+                        writer.append(path, pages=(page.page_number - 1, page.page_number))
+            with open(output_path, "wb") as f:
+                writer.write(f)
+        else:
+            raise ValueError(f"Unsupported library: {library}. "
+                             f"Choose from: pypdf, PyPDF2, pdfrw, fitz, PyPDF4, PyPDF3, pdfplumber")
 
         return {"filename": os.path.basename(output_path)}
 
     finally:
-        # Always delete temps
         for p in temp_paths:
             if os.path.exists(p):
-                os.remove(p)
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass  # ignore if already deleted
+
+
 
 # new compress
+
+
+
 def _calculate_target_size(
     original_bytes: int,
     target_size: Optional[str] = None,
-    percent: Optional[float] = None
+    percent: Optional[float] = None,
 ) -> int:
     """
-    Calculate target file size in bytes.
-
     Priority:
-    1. target_size → "500KB" or "2MB"
-    2. percent → 70 (means 70% of original)
-    3. Default → 50% of original
-
-    Returns:
-        int: Target size in bytes
+      1. target_size → "500KB" or "2MB"
+      2. percent → 70 (means 70% of original)
+      3. Default → 50% of original
     """
-    # 1. Target Size (KB/MB)
     if target_size:
-        target_size = target_size.strip().upper()
-        if not target_size.endswith(("KB", "MB")):
-            raise ValueError("target_size must end with 'KB' or 'MB' (e.g., '500KB', '2MB')")
-
+        s = target_size.strip().upper()
+        if not s.endswith(("KB", "MB")):
+            raise ValueError("target_size must end with 'KB' or 'MB'")
         try:
-            value = float(target_size[:-2])
+            val = float(s[:-2])
         except ValueError:
             raise ValueError("Invalid number in target_size")
+        return int(val * 1024) if s.endswith("KB") else int(val * 1024 * 1024)
 
-        if target_size.endswith("KB"):
-            return int(value * 1024)
-        elif target_size.endswith("MB"):
-            return int(value * 1024 * 1024)
-
-    # 2. Compression Percentage
-    elif percent is not None:
+    if percent is not None:
         if not (1 <= percent <= 99):
             raise ValueError("compression_percent must be between 1 and 99")
         return int(original_bytes * (percent / 100))
 
-    # 3. Default: 50%
-    else:
-        return int(original_bytes * 0.75)
+    return int(original_bytes * 0.5)          # <-- your default 50%
 
-def _compress_with_images(input_path: str, output_path: str, target_bytes: int):
+
+# ----------------------------------------------------------------------
+# 2. Image-binary-search helper (your code, cleaned up)
+# ----------------------------------------------------------------------
+def _compress_with_images(input_path: str, output_path: str, target_bytes: int) -> bool:
+    """
+    Returns True if the result is ≤ target_bytes * 1.1
+    (10 % tolerance – enough for most PDFs)
+    """
+    import fitz
+
     doc = fitz.open(input_path)
     low, high = 0.3, 1.0
     best_zoom = 1.0
 
     for _ in range(15):
         zoom = (low + high) / 2
-        size = _render_and_measure(doc, output_path, zoom)
+        size = _render_and_measure(doc, output_path + ".tmp", zoom)
         if size <= target_bytes:
             best_zoom = zoom
             low = zoom
         else:
             high = zoom
 
-    # Final render
+    # final render
     _render_and_measure(doc, output_path, best_zoom, final=True)
     doc.close()
 
+    if os.path.exists(output_path + ".tmp"):
+        os.remove(output_path + ".tmp")
 
-def _render_and_measure(doc, temp_path, zoom, final=False):
+    achieved = os.path.getsize(output_path)
+    return achieved <= target_bytes * 1.1
+
+
+def _render_and_measure(doc, temp_path: str, zoom: float, final: bool = False) -> int:
+    import fitz
     new_doc = fitz.open()
     for page in doc:
         mat = fitz.Matrix(zoom, zoom)
         pix = page.get_pixmap(matrix=mat, alpha=False)
-        img_data = pix.tobytes("png")
+        fmt = "jpeg" if final else "png"
+        img_data = pix.tobytes(fmt)
         new_page = new_doc.new_page(width=page.rect.width, height=page.rect.height)
         new_page.insert_image(page.rect, stream=img_data)
     new_doc.save(temp_path, garbage=4, deflate=True, clean=True)
     new_doc.close()
     return os.path.getsize(temp_path)
 
+
+# ----------------------------------------------------------------------
+# 3. Library-specific compressors (unchanged, except they receive target_bytes)
+# ----------------------------------------------------------------------
+def _compress_with_fitz(input_path: str, output_path: str, target_bytes: int) -> None:
+    import fitz
+    doc = fitz.open(input_path)
+    low, high = 0.05, 1.0
+    best_zoom = 1.0
+    for _ in range(16):
+        zoom = (low + high) / 2
+        size = _render_and_measure(doc, output_path + ".tmp", zoom)
+        if size <= target_bytes:
+            best_zoom = zoom
+            low = zoom
+        else:
+            high = zoom
+    _render_and_measure(doc, output_path, best_zoom, final=True)
+    doc.close()
+    if os.path.exists(output_path + ".tmp"):
+        os.remove(output_path + ".tmp")
+
+
+def _compress_with_ghostscript(input_path: str, output_path: str, target_bytes: int) -> None:
+    if shutil.which("gs") is None:
+        raise RuntimeError("Ghostscript not found – brew install ghostscript")
+    orig = os.path.getsize(input_path)
+    ratio = target_bytes / orig
+    dpi = max(50, min(300, int(math.sqrt(ratio / 0.0007))))
+    cmd = [
+        "gs", "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER",
+        "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.4",
+        "-dPDFSETTINGS=/ebook",
+        f"-dColorImageResolution={dpi}",
+        f"-dGrayImageResolution={dpi}",
+        f"-dMonoImageResolution={dpi}",
+        f"-sOutputFile={output_path}", input_path
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"Ghostscript error: {r.stderr.strip()}")
+
+
+def _compress_with_pikepdf(input_path: str, output_path: str) -> None:
+    import pikepdf
+    with pikepdf.open(input_path) as pdf:
+        pdf.save(output_path, compress_streams=True, linearize=True)
+
+
+def _compress_with_qpdf(input_path: str, output_path: str) -> None:
+    cmd = ["qpdf", "--linearize", "--compress-streams=y", input_path, output_path]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"qpdf error: {r.stderr.strip()}")
+
+
+def _compress_with_pdfminer_reportlab(input_path: str, output_path: str, target_bytes: int) -> None:
+    from pdfminer.high_level import extract_text
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+    text = extract_text(input_path)
+    c = canvas.Canvas(output_path, pagesize=letter)
+    w, h = letter
+    y = h - 50
+    for line in text.splitlines():
+        if y < 50:
+            c.showPage()
+            y = h - 50
+        c.drawString(50, y, line[:120])
+        y -= 14
+    c.save()
+
+
+def _compress_with_pdfrw(input_path: str, output_path: str) -> None:
+    from pdfrw import PdfReader, PdfWriter
+    r = PdfReader(input_path)
+    w = PdfWriter()
+    w.addpages(r.pages)
+    w.write(output_path)
+
+
+def _compress_with_pypdf2(input_path: str, output_path: str) -> None:
+    from PyPDF2 import PdfReader, PdfWriter
+    r = PdfReader(input_path)
+    w = PdfWriter()
+    for p in r.pages:
+        w.add_page(p)
+    with open(output_path, "wb") as f:
+        w.write(f)
+
+
+def _compress_with_pypdf(input_path: str, output_path: str) -> None:
+    from pypdf import PdfWriter
+    w = PdfWriter()
+    w.append(input_path)
+    with open(output_path, "wb") as f:
+        w.write(f)
+
+
+# ----------------------------------------------------------------------
+# 4. COMMON COMPRESS – default image path + fallback
+# ----------------------------------------------------------------------
+def _common_compress(
+    input_path: str,
+    final_output: str,
+    target_bytes: int,
+    library: str,
+) -> str:
+    """
+    Returns the path of the final file.
+    """
+    temp_output = final_output + ".tmp"
+
+    # ---------- 1. Try the image-binary-search (default) ----------
+    try:
+        if _compress_with_images(input_path, temp_output, target_bytes):
+            os.rename(temp_output, final_output)
+            return final_output
+    except Exception as e:
+        # image path failed – continue to library fallback
+        if os.path.exists(temp_output):
+            os.remove(temp_output)
+
+    # ---------- 2. Library-specific fallback ----------
+    if library in ("pymupdf", "fitz"):
+        _compress_with_fitz(input_path, final_output, target_bytes)
+    elif library == "ghostscript":
+        _compress_with_ghostscript(input_path, final_output, target_bytes)
+    elif library == "pikepdf":
+        _compress_with_pikepdf(input_path, final_output)
+    elif library == "qpdf":
+        _compress_with_qpdf(input_path, final_output)
+    elif library == "pdfminer.six":
+        _compress_with_pdfminer_reportlab(input_path, final_output, target_bytes)
+    elif library == "pdfrw":
+        _compress_with_pdfrw(input_path, final_output)
+    elif library == "pypdf2":
+        _compress_with_pypdf2(input_path, final_output)
+    elif library == "pypdf":
+        _compress_with_pypdf(input_path, final_output)
+    else:
+        raise ValueError(f"Unsupported library: {library}")
+
+    return final_output
+
+
+# ----------------------------------------------------------------------
+# 5. Public API – compress_pdf()
+# ----------------------------------------------------------------------
 def compress_pdf(
     file_1: UploadFile,
     upload_dir: str,
     output_dir: str,
     target_size: Optional[str] = None,
-    compression_percent: Optional[float] = None
+    compression_percent: Optional[float] = None,
+    library: str = "fitz",               # default = image-binary-search
 ) -> Dict[str, str]:
-    import pikepdf
-    from pikepdf import ObjectStreamMode, StreamDecodeLevel
-    import pymupdf as fitz
-    import os
+    library = library.lower().strip()
 
     if not file_1.filename.lower().endswith('.pdf'):
         raise ValueError("File must be a PDF.")
 
-    temp_input = get_temp_path(file_1.filename, "compress_input", upload_dir)
-    final_output = get_output_path("compressed", output_dir)
-    temp_output = final_output + ".tmp"  # intermediate
+    os.makedirs(upload_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
+
+    temp_input   = os.path.join(upload_dir, f"in_{file_1.filename}")
+    final_output = os.path.join(output_dir, f"compressed_{file_1.filename}")
 
     try:
-        # Save uploaded file
+        # ---- save uploaded file ----
         with open(temp_input, "wb") as f:
             shutil.copyfileobj(file_1.file, f)
 
-        original_size = os.path.getsize(temp_input)
-        print("original_size ",original_size)
-        target_bytes = _calculate_target_size(original_size, target_size, compression_percent)
-        print("target_bytes ",target_bytes)
-        # Try image compression
-        _compress_with_images(temp_input, temp_output, target_bytes)
+        orig_bytes   = os.path.getsize(temp_input)
+        target_bytes = _calculate_target_size(orig_bytes, target_size, compression_percent)
 
-        # Decide final file
-        if os.path.exists(temp_output) and os.path.getsize(temp_output) <= target_bytes * 1.1:
-            # Use image-compressed version
-            os.rename(temp_output, final_output)  # rename .tmp → final
-            # print(temp_output,final_output)
-            compressed_path = final_output
-        else:
-            # Fallback: pikepdf
-            if os.path.exists(temp_output):
-                os.remove(temp_output)
-            with pikepdf.open(temp_input) as pdf:
-                pdf.save(
-                    final_output,
-                    compress_streams=True,
-                    stream_decode_level=StreamDecodeLevel.generalized,
-                    object_stream_mode=ObjectStreamMode.preserve,
-                    linearize=True
-                )
-            compressed_path = final_output
-            # print(compressed_path)
+        # ---- compress (default image path → library fallback) ----
+        compressed_path = _common_compress(temp_input, final_output, target_bytes, library)
+
         final_size = os.path.getsize(compressed_path)
+        accuracy   = min(999.9, round(final_size / target_bytes * 100, 1))
+
         return {
             "filename": os.path.basename(compressed_path),
-            "original_size_kb": round(original_size / 1024, 1),
+            "original_size_kb": round(orig_bytes / 1024, 1),
             "compressed_size_kb": round(final_size / 1024, 1),
-            "target_accuracy": f"{round(final_size / target_bytes * 100, 1)}%"
+            "target_accuracy": f"{accuracy}%",
+            "target_bytes": target_bytes,
         }
 
     finally:
-        # Clean only temp files
-        for path in [temp_input, temp_output]:
-            if os.path.exists(path):
+        # clean only temporary files
+        for p in (temp_input, final_output + ".tmp"):
+            if os.path.exists(p):
                 try:
-                    os.remove(path)
+                    os.remove(p)
                 except:
-                    pass  # ignore if already gone
-
+                    pass
 
 #close compress
-
-
 
 def cleanup_temp_files(temp_paths: List[str]) -> None:
     for path in temp_paths:

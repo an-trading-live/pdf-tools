@@ -99,18 +99,38 @@ async def check_libreoffice():
     except Exception as e:
         print(f"LibreOffice check failed: {e}")
 
+# merging 
+class PDFLibrary(str, Enum):
+    # --- Merging Libraries ---
+    pypdf       = "pypdf"        # Modern, recommended
+    pypdf2      = "PyPDF2"
+    pdfrw       = "pdfrw"
+    fitz        = "fitz"         # PyMuPDF
+    pypdf4      = "PyPDF4"
+    pypdf3      = "PyPDF3"
+    pdfplumber  = "pdfplumber"
 
 @app.post("/merge")
 async def merge_pdfs(
     file_1: UploadFile = File(..., description="First PDF to merge"),
-    file_2: UploadFile = File(..., description="Second PDF to merge")
+    file_2: UploadFile = File(..., description="Second PDF to merge"),
+    library: str = Form("pypdf", description="PDF merging library: pypdf, PyPDF2, pdfrw, fitz, PyPDF4, PyPDF3, pdfplumber")
 ):
     """
-    Merge two PDFs and return the result for download.
+    Merge two PDFs using the specified library and return the result for download.
+    
+    Supported libraries:
+        pypdf (default), PyPDF2, pdfrw, fitz, PyPDF4, PyPDF3, pdfplumber
     """
     try:
-        await clear_outputs()
-        result = merge_two_pdfs(file_1, file_2, UPLOAD_DIR, OUTPUT_DIR)
+        await clear_outputs()  # your cleanup function
+        result = merge_two_pdfs(
+            file_1=file_1,
+            file_2=file_2,
+            upload_dir=UPLOAD_DIR,
+            output_dir=OUTPUT_DIR,
+            library=library  # passed here
+        )
         filename = result["filename"]
         file_path = os.path.join(OUTPUT_DIR, filename)
 
@@ -120,35 +140,72 @@ async def merge_pdfs(
             filename=filename,
             headers={"message": "PDFs merged successfully!"}
         )
+
     except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotImplementedError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error merging PDFs: {str(e)}")
+# compression woring
+
+class CompressLibrary(str, Enum):
+# --- Compression Libraries ---
+    fitz        = "fitz"
+    pdfrw       = "pdfrw"
+    pikepdf     = "pikepdf"      # Lossless, fast
+    ghostscript = "ghostscript"  # Max compression (requires system install)
+    qpdf        = "qpdf"         # Linearize + compress (requires system install)
+    pdfminer_six = "pdfminer.six"      # Text-only rebuild (lossy)
 
 
 @app.post("/compress")
 async def compress_pdf_endpoint(
-    file_1: UploadFile = File(..., description="PDF to compress"),
-    target_size: Optional[str] = Form(None, description="e.g., 500KB, 2MB"),
-    compression_percent: Optional[float] = Form(None, description="1-99 (percent of original)")
+    file_1: UploadFile = File(..., description="PDF file to compress"),
+    target_size: Optional[str] = Form(
+        None,
+        description="Target size like '500KB' or '2MB'"
+    ),
+    compression_percent: Optional[float] = Form(
+        None,
+        description="Reduce to X% of original (1–99)"
+    ),
+    library: CompressLibrary = Form(
+        CompressLibrary.pikepdf,
+        description="Choose compression backend"
+    )
 ):
+    """
+    Compress a PDF using the selected library.
+    """
     try:
-        await clear_outputs()
-        result = compress_pdf(file_1, UPLOAD_DIR, OUTPUT_DIR, target_size, compression_percent)
+        result = compress_pdf(
+            file_1=file_1,
+            upload_dir=UPLOAD_DIR,
+            output_dir=OUTPUT_DIR,
+            target_size=target_size,
+            compression_percent=compression_percent,
+            library=library.value  # .value gives the string
+        )
+
+        file_path = os.path.join(OUTPUT_DIR, result["filename"])
         return FileResponse(
-            path=os.path.join(OUTPUT_DIR, result["filename"]),
+            path=file_path,
             media_type="application/pdf",
             filename=result["filename"],
             headers={
-                "message": "PDF compressed successfully!",
-                "original-size-kb": str(result["original_size_kb"]),
-                "compressed-size-kb": str(result["compressed_size_kb"])
+                "X-Original-Size-KB": str(result["original_size_kb"]),
+                "X-Compressed-Size-KB": str(result["compressed_size_kb"]),
+                "X-Target-Accuracy": result["target_accuracy"]
             }
         )
+
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+    except ImportError as e:
+        raise HTTPException(status_code=400, detail=f"Library not available: {str(e)}")
     except Exception as e:
-        raise HTTPException(500, f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Compression failed: {str(e)}")
 
 
 @app.post("/excel-to-pdf")
