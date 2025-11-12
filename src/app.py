@@ -4,7 +4,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import FileResponse
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
-
+from enum import Enum
 from utils.pdf_handler import (
 compress_pdf, excel_to_pdf, pdf_to_word, pdf_to_excel,merge_two_pdfs
 )
