@@ -175,10 +175,12 @@ async def compress_pdf_endpoint(
         description="Choose compression backend"
     )
 ):
+
     """
     Compress a PDF using the selected library.
     """
     try:
+        await clear_outputs()
         result = compress_pdf(
             file_1=file_1,
             upload_dir=UPLOAD_DIR,
